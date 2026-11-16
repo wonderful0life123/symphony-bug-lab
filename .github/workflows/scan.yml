@@ -1,0 +1,41 @@
+name: Daily bug scan
+on:
+  schedule:
+    - cron: '17 1 * * *'  # UTC 01:17，即北京时间 09:17
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+concurrency:
+  group: symphony-scan-dispatch
+  cancel-in-progress: false
+
+jobs:
+  enqueue:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 有待处理的巡检就复用，否则创建一张
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const repo = context.repo;
+            const title = '[Scan] 运行运费回归测试';
+            const marker = '<!-- symphony:shipping-scan -->';
+            const pages = github.paginate.iterator(github.rest.issues.listForRepo, {
+              ...repo, state: 'open', labels: 'symphony', per_page: 100
+            });
+            for await (const page of pages) {
+              const pending = page.data.find(issue =>
+                !issue.pull_request && issue.body?.includes(marker)
+              );
+              if (pending) {
+                core.info('已有巡检单：' + pending.html_url);
+                return;
+              }
+            }
+            const result = await github.rest.issues.create({
+              ...repo, title, labels: ['symphony'],
+              body: marker + '\n运行运费回归测试。有可复现的失败时建 bug 单，并在这里报告结果。'
+            });
+            core.info('新巡检单：' + result.data.html_url);
